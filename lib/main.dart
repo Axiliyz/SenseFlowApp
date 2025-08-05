@@ -51,16 +51,19 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+  late TextEditingController _noteController;
 
   @override
   void initState() {
     super.initState();
+    _noteController = TextEditingController();
     _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnimation = CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut);
   }
 
   @override
   void dispose() {
+    _noteController.dispose();
     _fadeController.dispose();
     super.dispose();
   }
@@ -162,9 +165,11 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       resistance = session.resistance;
       dPulse1 = session.dPulse1;
       dPulse2 = session.dPulse2;
+      _noteController.text = session.note;
     });
     _fadeController.forward(from: 0);
   }
+
 
   void _filterSessionsByDay(DateTime day) {
     final filtered = sessions.where((s) =>
@@ -204,6 +209,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           const Text('Заметки', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           TextField(
+            controller: _noteController,
             maxLines: 5,
             decoration: const InputDecoration(
               hintText: 'Введите заметку...',
@@ -211,11 +217,16 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
               hintStyle: TextStyle(color: Colors.white54),
             ),
             style: const TextStyle(color: Colors.white),
+            onChanged: (text) {
+              final session = sessions.firstWhere((s) => s.name == currentSessionName);
+              session.note = text;
+            },
           ),
         ],
       ),
     ),
   );
+
 
   Widget _statisticsWidget(Statistics stats) {
     return Padding(
@@ -532,15 +543,15 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 children: [
                   ElevatedButton.icon(
                     onPressed: loadData,
-                    icon: const Icon(Icons.file_upload),
-                    label: const Text('Добавить файлы'),
+                    icon: const Icon(Icons.file_upload, color: Colors.white),
+                    label: const Text('Добавить файлы', style: TextStyle(color: Colors.white)),
                   ),
                   if (currentSessionName != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Text(
                         currentSessionName!,
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white70),
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                     ),
                   if (hasData) ...[
@@ -606,6 +617,7 @@ class _Session {
   final List<FlSpot> dPulse1;
   final List<FlSpot> dPulse2;
   final int durationInSeconds;
+  String note;
 
   _Session({
     required this.name,
@@ -616,6 +628,7 @@ class _Session {
     required this.dPulse1,
     required this.dPulse2,
     required this.durationInSeconds,
+    this.note = '',
   });
 }
 
