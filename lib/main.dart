@@ -6,8 +6,35 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:table_calendar/src/shared/utils.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:excel/excel.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
-void main() => runApp(const SenseFlowApp());
+final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
+
+void main() => runApp(ValueListenableBuilder<ThemeMode>(
+  valueListenable: themeNotifier,
+  builder: (_, mode, __) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    themeMode: mode,
+    theme: ThemeData.light().copyWith(
+      scaffoldBackgroundColor: const Color(0xFFF7F7F7),
+      cardColor: Colors.white,
+      textTheme: const TextTheme(bodyMedium: TextStyle(color: Colors.black)),
+    ),
+    darkTheme: ThemeData.dark().copyWith(
+      scaffoldBackgroundColor: const Color(0xFF121417),
+      cardColor: const Color(0xFF1E1F23),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3CE6BE)),
+      ),
+    ),
+    home: const DashboardPage(),
+  ),
+));
 
 class SenseFlowApp extends StatelessWidget {
   const SenseFlowApp({super.key});
@@ -51,22 +78,23 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  late TextEditingController _noteController;
+  late TextEditingController _noteInputController;
 
   @override
   void initState() {
     super.initState();
-    _noteController = TextEditingController();
+    _noteInputController = TextEditingController();
     _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnimation = CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut);
   }
 
   @override
   void dispose() {
-    _noteController.dispose();
+    _noteInputController.dispose();
     _fadeController.dispose();
     super.dispose();
   }
+
 
   Future<void> loadData() async {
     final result = await FilePicker.platform.pickFiles(
@@ -165,7 +193,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       resistance = session.resistance;
       dPulse1 = session.dPulse1;
       dPulse2 = session.dPulse2;
-      _noteController.text = session.note;
+      _noteInputController.clear();
     });
     _fadeController.forward(from: 0);
   }
@@ -198,35 +226,170 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     return DateTime(year, month, day, hour, minute, second);
   }
 
-  Widget _notesBlock() => Card(
-    margin: const EdgeInsets.symmetric(vertical: 8),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Заметки', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _noteController,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              hintText: 'Введите заметку...',
-              border: OutlineInputBorder(),
-              hintStyle: TextStyle(color: Colors.white54),
+  Widget _notesBlock() {
+    final session = sessions.firstWhere(
+      (s) => s.name == currentSessionName,
+      orElse: () => _emptySession(),
+    );
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Заметки', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _noteInputController,
+              decoration: const InputDecoration(
+                hintText: 'Введите заметку и нажмите Enter...',
+                border: OutlineInputBorder(),
+                hintStyle: TextStyle(color: Colors.white54),
+              ),
+              style: const TextStyle(color: Colors.white),
+              onSubmitted: (text) {
+                if (text.trim().isEmpty) return;
+                setState(() {
+                  session.notes = [...session.notes, text.trim()];
+                  _noteInputController.clear();
+                });
+              },
             ),
-            style: const TextStyle(color: Colors.white),
-            onChanged: (text) {
-              final session = sessions.firstWhere((s) => s.name == currentSessionName);
-              session.note = text;
-            },
+            const SizedBox(height: 12),
+            if (session.notes.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Ваши заметки:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  for (int i = 0; i < session.notes.length; i++)
+                    ListTile(
+                      title: Text(session.notes[i], style: const TextStyle(color: Colors.white)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.redAccent),
+                        onPressed: () {
+                          setState(() {
+                            session.notes.removeAt(i);
+                          });
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                  label: const Text('Экспорт в PDF', style: TextStyle(color: Colors.white)),
+                  onPressed: () {
+                    exportToPdf(context, session);
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showHelpDialog() {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Как пользоваться SenseFlow'),
+      content: const SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('1. Нажмите на иконку загрузки, чтобы выбрать .txt файл с измерениями.'),
+            SizedBox(height: 8),
+            Text('2. Используйте выпадающее меню "Сеансы" для переключения между загруженными файлами.'),
+            SizedBox(height: 8),
+            Text('3. В левом меню вы увидите календарь, недавние сессии и выбранный день.'),
+            SizedBox(height: 8),
+            Text('4. Нажмите на любой день в календаре, чтобы отфильтровать сеансы.'),
+            SizedBox(height: 8),
+            Text('5. Добавьте заметку для каждого сеанса в нижней части экрана.'),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Понятно')),
+      ],
+    ),
+  );
+}
+
+  void _showProfileDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Личный кабинет'),
+        content: const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Имя пользователя: Пользователь'),
+              SizedBox(height: 8),
+              Text('Всего сеансов: 0'),
+              SizedBox(height: 8),
+              Text('Последний вход: Сегодня'),
+              SizedBox(height: 8),
+              Text('Версия приложения: 1.0.0'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Закрыть'),
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
 
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Настройки'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.brightness_6),
+              title: const Text('Сменить тему'),
+              onTap: () {
+                Navigator.pop(context);
+                themeNotifier.value = themeNotifier.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help_outline),
+              title: const Text('Обучение'),
+              onTap: () {
+                Navigator.pop(context);
+                _showHelpDialog();
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _statisticsWidget(Statistics stats) {
     return Padding(
@@ -252,7 +415,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     final minVal = data.map((e) => e.y).reduce(min);
     final minY = (isResistance ? (minVal > 50 ? minVal - 50 : 0) : (minVal > 10 ? minVal - 10 : 0));
     final stats = Statistics.calculate(data);
-    
+
     return FadeTransition(
       opacity: _fadeAnimation,
       child: Card(
@@ -451,11 +614,41 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
             _filterSessionsByDay(sel);
           });
         },
-        calendarStyle: const CalendarStyle(
-          selectedDecoration: BoxDecoration(color: Colors.cyanAccent, shape: BoxShape.circle),
-          todayDecoration: BoxDecoration(color: Colors.deepPurpleAccent, shape: BoxShape.circle),
-          weekendTextStyle: TextStyle(color: Colors.white70),
-          defaultTextStyle: TextStyle(color: Colors.white),
+        calendarStyle: CalendarStyle(
+          selectedDecoration: const BoxDecoration(color: Colors.cyanAccent, shape: BoxShape.circle),
+          todayDecoration: const BoxDecoration(color: Colors.deepPurpleAccent, shape: BoxShape.circle),
+          weekendTextStyle: const TextStyle(color: Colors.white70),
+          defaultTextStyle: const TextStyle(color: Colors.white),
+          outsideTextStyle: const TextStyle(color: Colors.white38),
+          defaultDecoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.transparent,
+          ),
+          selectedTextStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          todayTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          weekendDecoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.transparent,
+          ),
+          holidayDecoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.transparent,
+          ),
+          markerDecoration: const BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+          ),
+          cellMargin: const EdgeInsets.all(4),
+          cellPadding: const EdgeInsets.all(0),
+          isTodayHighlighted: true,
+          markersMaxCount: 3,
+          markerSize: 6,
+          markerMargin: const EdgeInsets.symmetric(horizontal: 0.3),
+          markersAlignment: Alignment.bottomCenter,
+          markerDecoration: const BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+          ),
         ),
         daysOfWeekStyle: const DaysOfWeekStyle(
           weekdayStyle: TextStyle(color: Colors.white),
@@ -466,6 +659,65 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           formatButtonVisible: false,
           leftChevronIcon: Icon(Icons.chevron_left, color: Colors.white),
           rightChevronIcon: Icon(Icons.chevron_right, color: Colors.white),
+        ),
+        calendarBuilders: CalendarBuilders(
+          defaultBuilder: (context, day, focusedDay) {
+            return Container(
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.transparent,
+              ),
+              child: Center(
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.transparent,
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${day.day}',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+          selectedBuilder: (context, day, focusedDay) {
+            return Container(
+              margin: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.cyanAccent,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                ),
+              ),
+            );
+          },
+          todayBuilder: (context, day, focusedDay) {
+            return Container(
+              margin: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.deepPurpleAccent,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            );
+          },
         ),
       ),
     ),
@@ -513,7 +765,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
               ListTile(
                 title: Text(
                   '${session.date.hour.toString().padLeft(2, '0')}:${session.date.minute.toString().padLeft(2, '0')}:${session.date.second.toString().padLeft(2, '0')}',
-                  style: TextStyle(color: currentSessionName == session.name ? const Color(0xFF3CE6BE) : Colors.white70),
+                  style: TextStyle(color: currentSessionName == session.name ? const Color.fromARGB(255, 2, 189, 145) : Colors.white70),
                 ),
                 onTap: () => _selectSession(session),
               ),
@@ -531,7 +783,21 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     final hasData = pulse1.isNotEmpty || pulse2.isNotEmpty || resistance.isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('SenseFlow')),
+      appBar: AppBar(
+        title: const Text('SenseFlow'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: 'Личный кабинет',
+            onPressed: _showProfileDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Настройки',
+            onPressed: _showSettingsDialog,
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
         child: isWide
@@ -617,7 +883,7 @@ class _Session {
   final List<FlSpot> dPulse1;
   final List<FlSpot> dPulse2;
   final int durationInSeconds;
-  String note;
+  List<String> notes;
 
   _Session({
     required this.name,
@@ -628,8 +894,54 @@ class _Session {
     required this.dPulse1,
     required this.dPulse2,
     required this.durationInSeconds,
-    this.note = '',
+    this.notes = const [],
   });
+}
+
+// Экспорт PDF
+Future<void> exportToPdf(BuildContext context, _Session session) async {
+  final fontData = await rootBundle.load("assets/fonts/Roboto.ttf");
+  final ttf = pw.Font.ttf(fontData);
+
+  final pdf = pw.Document();
+
+  pdf.addPage(
+    pw.MultiPage(
+      build: (context) => [
+        pw.Header(
+          level: 0,
+          child: pw.Text('SenseFlow, сессия: ${session.date}',
+              style: pw.TextStyle(font: ttf, fontSize: 20)),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Text('Пульс 1', style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold, fontSize: 16)),
+        pw.Bullet(text: 'Среднее: ${Statistics.calculate(session.pulse1).mean.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Макс: ${Statistics.calculate(session.pulse1).max.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Мин: ${Statistics.calculate(session.pulse1).min.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.SizedBox(height: 12),
+        pw.Text('Пульс 2', style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold, fontSize: 16)),
+        pw.Bullet(text: 'Среднее: ${Statistics.calculate(session.pulse2).mean.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Макс: ${Statistics.calculate(session.pulse2).max.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Мин: ${Statistics.calculate(session.pulse2).min.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.SizedBox(height: 12),
+        pw.Text('Сопротивление', style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold, fontSize: 16)),
+        pw.Bullet(text: 'Среднее: ${Statistics.calculate(session.resistance).mean.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Макс: ${Statistics.calculate(session.resistance).max.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.Bullet(text: 'Мин: ${Statistics.calculate(session.resistance).min.toStringAsFixed(2)}', style: pw.TextStyle(font: ttf)),
+        pw.SizedBox(height: 20),
+        if (session.notes.isNotEmpty)
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('Заметки:', style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold)),
+              ...session.notes.map((n) => pw.Bullet(text: n, style: pw.TextStyle(font: ttf))),
+            ],
+          ),
+      ],
+    ),
+  );
+
+  await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
 }
 
 class Statistics {
