@@ -38,6 +38,13 @@ def make_link():
     sig = make_sig(q)
     return {"url": f"/download/latest?q={q}&sig={sig}"}
 
+@app.get("/diag")
+def diag():
+    import os
+    return {"OWNER": os.getenv("OWNER"), "REPO": os.getenv("REPO"),
+            "GHTOK_set": bool(os.getenv("GHTOK")), "SECRET_set": bool(os.getenv("SECRET"))}
+
+
 @app.get("/download/latest")
 async def latest(q: str, sig: str):
     if not all([OWNER, REPO, GHTOK, SECRET]):
