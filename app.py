@@ -2,20 +2,21 @@ from fastapi import FastAPI, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 import httpx, os, time, hmac, hashlib, base64
 
-# === ENV ===
-OWNER = os.getenv("OWNER")          # напр. "Axiliyz"
-REPO  = os.getenv("REPO")           # напр. "SenseFlowApp"
+# ===== ENV =====
+OWNER = os.getenv("OWNER")          # пример: "Axiliyz"
+REPO  = os.getenv("REPO")           # пример: "SenseFlowApp"
 GHTOK = os.getenv("GHTOK")          # PAT с доступом read к репо (classic: repo; для org — Authorize SSO)
 SECRET= os.getenv("SECRET")         # длинный секрет для подписи ссылок
 
 app = FastAPI(title="SenseFlow Private Latest")
 
-# === helpers ===
+# ===== helpers =====
 def _make_sig(q: str) -> str:
     d = hmac.new(SECRET.encode(), q.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(d).decode().rstrip("=")
 
 def _verify(q: str, sig: str, ttl=900) -> bool:
+    """Проверка подписи и срока жизни ссылки (по умолчанию 15 минут)."""
     try:
         parts = dict(p.split("=", 1) for p in q.split("&") if "=" in p)
         ts = int(parts.get("ts", "0"))
@@ -25,14 +26,31 @@ def _verify(q: str, sig: str, ttl=900) -> bool:
         return False
     return hmac.compare_digest(_make_sig(q), sig)
 
+async def _get_with_redirect(cli: httpx.AsyncClient, url: str, headers: dict, max_hops: int = 5) -> httpx.Response:
+    """
+    GET без авто-редиректов. Если 30x — идём по Location вручную,
+    каждый раз передаём те же headers (включая Authorization).
+    Нужно для приватных zipball/asset ссылок GitHub → codeload.
+    """
+    for _ in range(max_hops):
+        r = await cli.get(url, headers=headers, follow_redirects=False)
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = r.headers.get("Location")
+            if not loc:
+                return r
+            url = loc
+            continue
+        return r
+    raise HTTPException(502, "Too many redirects")
+
 async def _get_latest_zip_info(cli: httpx.AsyncClient, headers: dict) -> tuple[str, str]:
     """
-    Возвращает (zip_url, name) для скачивания:
+    Возвращает (zip_url, name):
       1) releases/latest → zipball_url + tag_name
       2) если 404 → /tags (последний тег) → zipball по тегу
       3) если и тегов нет → zipball по default_branch
     """
-    # 1) пробуем опубликованный релиз
+    # 1) опубликованный релиз
     r = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest", headers=headers)
     if r.status_code == 200:
         data = r.json()
@@ -43,13 +61,12 @@ async def _get_latest_zip_info(cli: httpx.AsyncClient, headers: dict) -> tuple[s
         return zip_url, name
 
     if r.status_code not in (404, 410):
-        # Любой другой код GitHub → отдаём текст ошибки
         raise HTTPException(
             502,
             detail=f"GitHub releases/latest status={r.status_code} body={r.text[:4000]}"
         )
 
-    # 2) берем последний тег
+    # 2) последний тег
     t = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/tags?per_page=1", headers=headers)
     if t.status_code == 200 and t.json():
         tag = t.json()[0]["name"]
@@ -58,14 +75,11 @@ async def _get_latest_zip_info(cli: httpx.AsyncClient, headers: dict) -> tuple[s
     # 3) дефолтная ветка
     repo = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}", headers=headers)
     if repo.status_code != 200:
-        raise HTTPException(
-            502,
-            detail=f"GitHub repo status={repo.status_code} body={repo.text[:4000]}"
-        )
+        raise HTTPException(502, detail=f"GitHub repo status={repo.status_code} body={repo.text[:4000]}")
     default_branch = repo.json().get("default_branch", "main")
     return (f"https://api.github.com/repos/{OWNER}/{REPO}/zipball/{default_branch}", default_branch)
 
-# === endpoints ===
+# ===== endpoints =====
 @app.get("/healthz")
 def healthz():
     ok_env = all([OWNER, REPO, GHTOK, SECRET])
@@ -73,12 +87,11 @@ def healthz():
 
 @app.get("/", response_class=RedirectResponse)
 def root_redirect():
-    """Автоматически генерим временную ссылку и редиректим на скачку."""
+    """Автоматически генерим временную ссылку и редиректим на скачивание."""
     if not all([OWNER, REPO, GHTOK, SECRET]):
-        # Поясняем прямо на главной
         html = """
         <h2>Env not set</h2>
-        <p>Нужно задать переменные окружения OWNER, REPO, GHTOK, SECRET в Render → Environment.</p>
+        <p>Нужно задать переменные окружения OWNER, REPO, GHTOK, SECRET.</p>
         """
         return HTMLResponse(html, status_code=500)
     ts = str(int(time.time()))
@@ -102,17 +115,13 @@ async def download_latest(q: str, sig: str):
     if not _verify(q, sig):
         raise HTTPException(403, "forbidden")
 
-    headers = {
-        "Authorization": f"Bearer {GHTOK}",
-        "User-Agent": "senseflow-latest"
-    }
+    headers = {"Authorization": f"Bearer {GHTOK}", "User-Agent": "senseflow-latest"}
 
     try:
         async with httpx.AsyncClient(timeout=90) as cli:
             zip_url, name = await _get_latest_zip_info(cli, headers)
-            z = await cli.get(zip_url, headers=headers)
+            z = await _get_with_redirect(cli, zip_url, headers)
             if z.status_code != 200:
-                # Текст ошибки прокидываем наружу (как text/plain)
                 return PlainTextResponse(
                     f"Zip download status={z.status_code}\n{z.text}",
                     status_code=502,
@@ -136,7 +145,7 @@ async def download_latest(q: str, sig: str):
             headers={"Cache-Control": "no-store"},
         )
 
-# (опционально) Диагностика окружения — закрой перед продом
+# (опционально) Диагностика окружения — отключи в проде
 # @app.get("/diag")
 # def diag():
 #     return {"OWNER": OWNER, "REPO": REPO, "GHTOK_set": bool(GHTOK), "SECRET_set": bool(SECRET)}
