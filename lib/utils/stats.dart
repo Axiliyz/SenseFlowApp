@@ -51,7 +51,9 @@ class Statistics {
     final sdnn = stdDev;
     double ssd = 0; for (int i=1;i<values.length;i++) { ssd += pow(values[i]-values[i-1],2); }
     final rmssd = sqrt(ssd / (values.length-1));
-    int nn50=0; for (int i=1;i<values.length;i++) if ((values[i]-values[i-1]).abs()>50) nn50++;
+    int nn50=0; for (int i=1;i<values.length;i++) {
+      if ((values[i]-values[i-1]).abs()>50) nn50++;
+    }
     final pnn50 = (nn50 / (values.length-1)) * 100;
 
     final stabilityCoeff = min / max;

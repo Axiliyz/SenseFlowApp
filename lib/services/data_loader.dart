@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../models/session.dart';
+import 'raw_files_store.dart';
 
 class SessionRepository {
   Future<List<Session>> pickAndLoadSessions() async {
@@ -17,6 +18,9 @@ class SessionRepository {
       if (file.name.startsWith('D')) continue;
 
       final content = utf8.decode(file.bytes!);
+      // Save raw bytes for further TXT→CSV/XLSX export
+      RawFilesStore.put(file.name, file.bytes!);
+      RawFilesStore.put(file.name.replaceAll('.txt',''), file.bytes!);
       final lines = const LineSplitter().convert(content);
       final lastLine = lines.isNotEmpty ? lines.last : '';
       final durationMatch = RegExp(r'(\d+)\s*сек').firstMatch(lastLine);
@@ -40,7 +44,9 @@ class SessionRepository {
 
       final dFileName = 'D${file.name.replaceAll('.txt','')}.txt';
       if (filesMap.containsKey(dFileName)) {
-        final dContent = utf8.decode(filesMap[dFileName]!.bytes!);
+        RawFilesStore.put(dFileName, filesMap[dFileName]!.bytes!);
+          RawFilesStore.put(dFileName.replaceAll('.txt',''), filesMap[dFileName]!.bytes!);
+          final dContent = utf8.decode(filesMap[dFileName]!.bytes!);
         final dLines = const LineSplitter().convert(dContent);
         for (var i=0;i<dLines.length;i++) {
           final parts = dLines[i].trim().split(' ');

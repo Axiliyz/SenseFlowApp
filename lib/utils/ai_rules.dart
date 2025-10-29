@@ -71,8 +71,8 @@ AiAnalysis analyzeSession(Session s) {
 
   if (highPulse) reasons.add('Высокий средний пульс (${meanPulse.toStringAsFixed(0)})');
   if (midPulse)  reasons.add('Повышенный средний пульс (${meanPulse.toStringAsFixed(0)})');
-  if (rising)    reasons.add('Растущий тренд пульса');
-  if (lowHRV)    reasons.add('Низкая вариабельность (RMSSD ${rmssd.toStringAsFixed(0)}, SDNN ${sdnn.toStringAsFixed(0)})');
+  // if (rising)    reasons.add('Растущий тренд пульса');
+  // if (lowHRV)    reasons.add('Низкая вариабельность (RMSSD ${rmssd.toStringAsFixed(0)}, SDNN ${sdnn.toStringAsFixed(0)})');
   if (dropRes)   reasons.add('Падение сопротивления ${resistanceDrop.toStringAsFixed(1)}%');
   if (manyPeaks) reasons.add('Много пиков/скачков ($peaksCount)');
 

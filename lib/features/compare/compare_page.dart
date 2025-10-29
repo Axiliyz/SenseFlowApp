@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/session.dart';
 import '../../utils/chart_colors.dart';
 import '../../widgets/neon_card.dart';
+import '../../utils/filters.dart';
 
 class ComparePage extends StatefulWidget {
   final List<Session> sessions;
@@ -15,6 +16,7 @@ class ComparePage extends StatefulWidget {
 class _ComparePageState extends State<ComparePage> {
   Session? a;
   Session? b;
+  final chartColors = ChartColors();  // Add this line
 
   @override
   void initState() {
@@ -92,7 +94,7 @@ class _ComparePageState extends State<ComparePage> {
                 dataB: b!.resistance,
                 durA: a!.durationInSeconds,
                 durB: b!.durationInSeconds,
-                colorA: resistanceColor(context),
+                colorA: chartColors.resistance(context),  // Changed this line
                 colorB: Theme.of(context).brightness == Brightness.dark
                     ? const Color(0xFFFFD166) // янтарь в дарке
                     : const Color(0xFF9C6B00), // тёплый тёмно‑янтарный в лайте
@@ -122,7 +124,11 @@ class _ComparePageState extends State<ComparePage> {
         );
       }).toList(),
       onChanged: (val) => setState(() {
-        if (isFirst) a = val; else b = val;
+        if (isFirst) {
+          a = val;
+        } else {
+          b = val;
+        }
       }),
       decoration: const InputDecoration(
         hintText: 'Выбрать сессию',
@@ -184,7 +190,7 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-class _CompareLineCard extends StatelessWidget {
+class _CompareLineCard extends StatefulWidget {
   final String title;
   final List<FlSpot> dataA;
   final List<FlSpot> dataB;
@@ -204,11 +210,28 @@ class _CompareLineCard extends StatelessWidget {
   });
 
   @override
+  State<_CompareLineCard> createState() => _CompareLineCardState();
+}
+
+class _CompareLineCardState extends State<_CompareLineCard> {
+  ChartFilter _filterA = ChartFilter.none;
+  ChartFilter _filterB = ChartFilter.none;
+
+  @override
   Widget build(BuildContext context) {
-    if (dataA.isEmpty && dataB.isEmpty) return const SizedBox.shrink();
+    if (widget.dataA.isEmpty && widget.dataB.isEmpty) return const SizedBox.shrink();
+
+    final filteredDataA = _filterA.apply(widget.dataA);
+    final filteredDataB = _filterB.apply(widget.dataB);
+
+    // Fix data references
+    final durA = widget.durA;
+    final durB = widget.durB;
+    final dataA = widget.dataA;
+    final dataB = widget.dataB;
 
     // Диапазон Y общий по двум наборам
-    final all = [...dataA, ...dataB];
+    final all = [...filteredDataA, ...filteredDataB];
     final maxY = all.map((e) => e.y).reduce((a,b)=>a>b?a:b);
     final minY = all.map((e) => e.y).reduce((a,b)=>a<b?a:b);
 
@@ -219,7 +242,7 @@ class _CompareLineCard extends StatelessWidget {
     final tooltipBorder = isDark ? Colors.black.withOpacity(0.12) : Colors.black.withOpacity(0.08);
 
     // Вспомогалки
-    LineChartBarData _line(List<FlSpot> data, Color base) => LineChartBarData(
+    LineChartBarData line(List<FlSpot> data, Color base) => LineChartBarData(
       spots: data,
       isCurved: true,
       color: base,
@@ -235,10 +258,10 @@ class _CompareLineCard extends StatelessWidget {
       ),
     );
 
-    String _secLabel(double x, int dur, int len) {
-      if (dur == 0 || len <= 1) return '${x.toStringAsFixed(0)}';
+    String secLabel(double x, int dur, int len) {
+      if (dur == 0 || len <= 1) return x.toStringAsFixed(0);
       final seconds = (dur * x / (len - 1)).round();
-      return '${seconds}с';
+      return '$secondsс';
     }
 
     return Container(
@@ -252,7 +275,33 @@ class _CompareLineCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(widget.title, 
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold
+                )
+              ),
+              Row(
+                children: [
+                  _FilterButton(
+                    currentFilter: _filterA,
+                    onChanged: (f) => setState(() => _filterA = f),
+                    color: widget.colorA,
+                    label: 'A',
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterButton(
+                    currentFilter: _filterB,
+                    onChanged: (f) => setState(() => _filterB = f),
+                    color: widget.colorB,
+                    label: 'B',
+                  ),
+                ],
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           SizedBox(
             height: 180,
@@ -271,9 +320,9 @@ class _CompareLineCard extends StatelessWidget {
                       return List.generate(spots.length, (i) {
                         final s = spots[i];
                         final bool isA = s.barIndex == 0; // первая линия
-                        final int dur = isA ? durA : durB;
+                        final int dur = isA ? widget.durA : widget.durB;
                         final int len = isA ? (dataA.isEmpty ? 0 : dataA.length) : (dataB.isEmpty ? 0 : dataB.length);
-                        final secs = _secLabel(s.x, dur, len);
+                        final secs = secLabel(s.x, dur, len);
                         final color = i == 0 ? tooltipMain : tooltipSub;
                         final prefix = isA ? 'A' : 'B';
                         return LineTooltipItem('$prefix: $secs\n${s.y.toStringAsFixed(1)}', TextStyle(color: color));
@@ -307,7 +356,7 @@ class _CompareLineCard extends StatelessWidget {
                           return Text(value.toStringAsFixed(0),
                               style: TextStyle(color: axisTextColor(context), fontSize: 11, fontWeight: FontWeight.w600));
                         }
-                        final secs = _secLabel(value, durA, dataA.length);
+                        final secs = secLabel(value, durA, dataA.length);
                         return Text(secs, style: TextStyle(color: axisTextColor(context), fontSize: 11, fontWeight: FontWeight.w600));
                       },
                     ),
@@ -315,13 +364,83 @@ class _CompareLineCard extends StatelessWidget {
                 ),
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
-                  _line(dataA, colorA),
-                  _line(dataB, colorB),
+                  line(filteredDataA, widget.colorA),
+                  line(filteredDataB, widget.colorB),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ...existing helper methods...
+}
+
+// Add new widget for filter button
+class _FilterButton extends StatelessWidget {
+  final ChartFilter currentFilter;
+  final void Function(ChartFilter) onChanged;
+  final Color color;
+  final String label;
+
+  const _FilterButton({
+    required this.currentFilter,
+    required this.onChanged,
+    required this.color,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<ChartFilter>(
+      initialValue: currentFilter,
+      onSelected: onChanged,
+      itemBuilder: (context) => ChartFilter.values.map((f) => 
+        PopupMenuItem(
+          value: f,
+          child: Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Text('$label: ${f.name}'),
+            ],
+          ),
+        )
+      ).toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.1),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            Text('${currentFilter.name}'),
+            const Icon(Icons.arrow_drop_down, size: 20),
+          ],
+        ),
       ),
     );
   }

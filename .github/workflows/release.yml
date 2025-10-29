@@ -1,0 +1,25 @@
+name: Release ZIP
+on:
+  push:
+    tags: ['v*']         # релиз только по тегам vX.Y.Z
+  workflow_dispatch: {}
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Create ZIP (sources only)
+        run: |
+          rm -rf .git .github
+          zip -rq app.zip .
+          sha256sum app.zip > app.zip.sha256
+      - name: Create Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app.zip
+            app.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

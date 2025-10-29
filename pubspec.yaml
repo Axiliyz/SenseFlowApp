@@ -18,10 +18,14 @@ dependencies:
   path_provider: ^2.1.2
   pdf: ^3.10.1
   printing: ^5.13.3
-  excel: ^2.1.0
+  csv: ^5.0.2
+  excel: ^2.0.4
+  file_saver: ^0.2.9
+  open_filex: ^4.3.4
   # для проверки, что мы в web (для сохранения Excel через <a>)
   flutter_web_plugins:
     sdk: flutter
+  math_expressions: ^3.0.0
 
 dependency_overrides:
   file_picker:
