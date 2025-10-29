@@ -3,10 +3,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 import httpx, os, time, hmac, hashlib, base64
 
 # ===== ENV =====
-OWNER = os.getenv("OWNER")          # пример: "Axiliyz"
-REPO  = os.getenv("REPO")           # пример: "SenseFlowApp"
-GHTOK = os.getenv("GHTOK")          # PAT с доступом read к репо (classic: repo; для org — Authorize SSO)
-SECRET= os.getenv("SECRET")         # длинный секрет для подписи ссылок
+OWNER = os.getenv("OWNER") 
+REPO  = os.getenv("REPO")   
+GHTOK = os.getenv("GHTOK")        
+SECRET= os.getenv("SECRET")      
 
 app = FastAPI(title="SenseFlow Private Latest")
 
@@ -144,8 +144,3 @@ async def download_latest(q: str, sig: str):
             status_code=500,
             headers={"Cache-Control": "no-store"},
         )
-
-# (опционально) Диагностика окружения — отключи в проде
-# @app.get("/diag")
-# def diag():
-#     return {"OWNER": OWNER, "REPO": REPO, "GHTOK_set": bool(GHTOK), "SECRET_set": bool(SECRET)}
