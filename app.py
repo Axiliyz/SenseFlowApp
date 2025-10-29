@@ -40,27 +40,48 @@ def make_link():
 
 @app.get("/download/latest")
 async def latest(q: str, sig: str):
-    if not verify(q, sig):
-        raise HTTPException(403, "forbidden")
-    if not all([OWNER, REPO, GHTOK]):
+    if not all([OWNER, REPO, GHTOK, SECRET]):
         raise HTTPException(500, "env not set")
+    if not _verify(q, sig):
+        raise HTTPException(403, "forbidden")
 
     headers = {"Authorization": f"Bearer {GHTOK}", "User-Agent": "senseflow-latest"}
     async with httpx.AsyncClient(timeout=60) as cli:
-        # берём автоархив исходников последнего релиза (zipball)
-        r = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest", headers=headers)
-        if r.status_code != 200:
-            return Response(f"GitHub status={r.status_code}\n{r.text}", media_type="text/plain", status_code=502)
-        data = r.json()
-        zip_url = data.get("zipball_url")
-        if not zip_url:
-            raise HTTPException(404, "zipball_url not found in release")
+        # 1) пробуем последний РЕЛИЗ
+        rel = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest", headers=headers)
 
+        if rel.status_code == 200:
+            data = rel.json()
+            zip_url = data.get("zipball_url")
+            tag     = data.get("tag_name", "latest")
+        elif rel.status_code == 404:
+            # 2) нет релизов → берём последний ТЕГ
+            tags = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/tags?per_page=1", headers=headers)
+            if tags.status_code == 200 and tags.json():
+                tag = tags.json()[0]["name"]
+                zip_url = f"https://api.github.com/repos/{OWNER}/{REPO}/zipball/{tag}"
+            else:
+                # 3) нет тегов → zip текущей дефолтной ветки
+                repo = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}", headers=headers)
+                if repo.status_code != 200:
+                    return Response(f"Repo status={repo.status_code}\n{repo.text}", media_type="text/plain", status_code=502)
+                default_branch = repo.json().get("default_branch", "main")
+                tag = default_branch
+                zip_url = f"https://api.github.com/repos/{OWNER}/{REPO}/zipball/{default_branch}"
+        else:
+            return Response(f"GitHub status={rel.status_code}\n{rel.text}", media_type="text/plain", status_code=502)
+
+        # 4) качаем zipball и проксируем пользователю
         z = await cli.get(zip_url, headers=headers)
         if z.status_code != 200:
             return Response(f"Zip download status={z.status_code}\n{z.text}", media_type="text/plain", status_code=502)
 
-        fname = f'{REPO}-{data.get("tag_name","latest")}.zip'
-        return Response(z.content, media_type="application/zip",
-                        headers={"Cache-Control":"no-store",
-                                 "Content-Disposition": f'attachment; filename="{fname}"'})
+        fname = f'{REPO}-{tag}.zip'
+        return Response(
+            content=z.content,
+            media_type="application/zip",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{fname}"'
+            }
+        )
