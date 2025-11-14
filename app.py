@@ -16,7 +16,7 @@ def _make_sig(q: str) -> str:
     return base64.urlsafe_b64encode(d).decode().rstrip("=")
 
 def _verify(q: str, sig: str, ttl=900) -> bool:
-    """Проверка подписи и срока жизни ссылки (по умолчанию 15 минут)."""
+    """Проверка подписи и срока ссылки (15 минут)"""
     try:
         parts = dict(p.split("=", 1) for p in q.split("&") if "=" in p)
         ts = int(parts.get("ts", "0"))
@@ -28,9 +28,7 @@ def _verify(q: str, sig: str, ttl=900) -> bool:
 
 async def _get_with_redirect(cli: httpx.AsyncClient, url: str, headers: dict, max_hops: int = 5) -> httpx.Response:
     """
-    GET без авто-редиректов. Если 30x — идём по Location вручную,
-    каждый раз передаём те же headers (включая Authorization).
-    Нужно для приватных zipball/asset ссылок GitHub → codeload.
+    GET для приватных zipball ссылок GitHub
     """
     for _ in range(max_hops):
         r = await cli.get(url, headers=headers, follow_redirects=False)
@@ -46,9 +44,9 @@ async def _get_with_redirect(cli: httpx.AsyncClient, url: str, headers: dict, ma
 async def _get_latest_zip_info(cli: httpx.AsyncClient, headers: dict) -> tuple[str, str]:
     """
     Возвращает (zip_url, name):
-      1) releases/latest → zipball_url + tag_name
-      2) если 404 → /tags (последний тег) → zipball по тегу
-      3) если и тегов нет → zipball по default_branch
+      1) releases/latest - zipball_url + tag_name
+      2) если 404 - /tags (последний тег) - zipball по тегу
+      3) если и тегов нет - zipball по default_branch
     """
     # 1) опубликованный релиз
     r = await cli.get(f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest", headers=headers)
